@@ -1,0 +1,66 @@
+[9.435s] DEBUG:colcon:Command line arguments: ['/usr/bin/colcon', 'build', '--packages-select', 'my_moveit_config']
+[9.436s] DEBUG:colcon:Parsed command line arguments: Namespace(log_base=None, log_level=None, verb_name='build', build_base='build', install_base='install', merge_install=False, symlink_install=False, test_result_base=None, continue_on_error=False, executor='parallel', parallel_workers=8, event_handlers=None, ignore_user_meta=False, metas=['./colcon.meta'], base_paths=['.'], packages_ignore=None, packages_ignore_regex=None, paths=None, packages_up_to=None, packages_up_to_regex=None, packages_above=None, packages_above_and_dependencies=None, packages_above_depth=None, packages_select_by_dep=None, packages_skip_by_dep=None, packages_skip_up_to=None, packages_select_build_failed=False, packages_skip_build_finished=False, packages_select_test_failures=False, packages_skip_test_passed=False, packages_select=['my_moveit_config'], packages_skip=None, packages_select_regex=None, packages_skip_regex=None, packages_start=None, packages_end=None, lookup_in_workspace=False, cargo_args=None, clean_build=False, cmake_args=None, cmake_target=None, cmake_target_skip_unavailable=False, cmake_clean_cache=False, cmake_clean_first=False, cmake_force_configure=False, ament_cmake_args=None, catkin_cmake_args=None, catkin_skip_building_tests=False, mixin_files=None, mixin=None, verb_parser=<colcon_mixin.mixin.mixin_argument.MixinArgumentDecorator object at 0x7fe8309db640>, verb_extension=<colcon_core.verb.build.BuildVerb object at 0x7fe83138c520>, main=<bound method BuildVerb.main of <colcon_core.verb.build.BuildVerb object at 0x7fe83138c520>>, mixin_verb=('build',))
+[10.349s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) check parameters
+[10.349s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) check parameters
+[10.349s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) check parameters
+[10.349s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) check parameters
+[10.349s] Level 1:colcon.colcon_core.package_discovery:discover_packages(colcon_meta) discover
+[10.350s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) discover
+[10.350s] INFO:colcon.colcon_core.package_discovery:Crawling recursively for packages in '/home/user/ros2_ws/src/advanced_perception/advanced_perception'
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ignore', 'ignore_ament_install']
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore'
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ignore_ament_install'
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_pkg']
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_pkg'
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['colcon_meta']
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'colcon_meta'
+[10.350s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ament_cargo']
+[10.351s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ament_cargo'
+[10.351s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['ros']
+[10.351s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'ros'
+[10.375s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['cargo', 'cmake', 'python']
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'cargo'
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'cmake'
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python'
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extensions ['python_setup_py']
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(.) by extension 'python_setup_py'
+[10.376s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extensions ['ignore', 'ignore_ament_install']
+[10.377s] Level 1:colcon.colcon_core.package_identification:_identify(build) by extension 'ignore'
+[10.377s] Level 1:colcon.colcon_core.package_identification:_identify(build) ignored
+[10.377s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extensions ['ignore', 'ignore_ament_install']
+[10.379s] Level 1:colcon.colcon_core.package_identification:_identify(install) by extension 'ignore'
+[10.379s] Level 1:colcon.colcon_core.package_identification:_identify(install) ignored
+[10.379s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extensions ['ignore', 'ignore_ament_install']
+[10.379s] Level 1:colcon.colcon_core.package_identification:_identify(log) by extension 'ignore'
+[10.379s] Level 1:colcon.colcon_core.package_identification:_identify(log) ignored
+[10.380s] Level 1:colcon.colcon_core.package_discovery:discover_packages(recursive) using defaults
+[10.380s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) discover
+[10.380s] Level 1:colcon.colcon_core.package_discovery:discover_packages(ignore) using defaults
+[10.380s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) discover
+[10.380s] Level 1:colcon.colcon_core.package_discovery:discover_packages(path) using defaults
+[10.397s] WARNING:colcon.colcon_core.package_selection:ignoring unknown package 'my_moveit_config' in --packages-select
+[10.510s] INFO:colcon.colcon_core.executor:Executing jobs using 'parallel' executor
+[10.515s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete
+[10.516s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:closing loop
+[10.516s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:loop closed
+[10.516s] DEBUG:colcon.colcon_parallel_executor.executor.parallel:run_until_complete finished with '0'
+[10.516s] DEBUG:colcon.colcon_core.event_reactor:joining thread
+[10.671s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.notify_send': Could not find 'notify-send'
+[10.671s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.terminal_notifier': Not used on non-Darwin systems
+[10.671s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_notification.desktop_notification.win32': Not used on non-Windows systems
+[10.671s] INFO:colcon.colcon_notification.desktop_notification:Sending desktop notification using 'notify2'
+[10.684s] DEBUG:colcon.colcon_notification.desktop_notification.notify2:Failed to initialize notify2: org.freedesktop.DBus.Error.Spawn.ExecFailed: /usr/bin/dbus-launch terminated abnormally without any error message
+[10.685s] DEBUG:colcon.colcon_core.event_reactor:joined thread
+[10.707s] INFO:colcon.colcon_core.plugin_system:Skipping extension 'colcon_core.shell.bat': Not used on non-Windows systems
+[10.708s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/local_setup.ps1'
+[10.712s] INFO:colcon.colcon_core.shell:Creating prefix util module '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/_local_setup_util_ps1.py'
+[10.716s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/setup.ps1'
+[10.726s] WARNING:colcon.colcon_ros.prefix_path.ament:The path '/home/user/ros2_ws/install/barista_robot_description' in the environment variable AMENT_PREFIX_PATH doesn't exist
+[10.727s] WARNING:colcon.colcon_ros.prefix_path.catkin:The path '/home/user/ros2_ws/install/barista_robot_description' in the environment variable CMAKE_PREFIX_PATH doesn't exist
+[10.729s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/local_setup.sh'
+[10.730s] INFO:colcon.colcon_core.shell:Creating prefix util module '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/_local_setup_util_sh.py'
+[10.731s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/setup.sh'
+[10.737s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/local_setup.bash'
+[10.739s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/setup.bash'
+[10.760s] INFO:colcon.colcon_core.shell:Creating prefix script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/local_setup.zsh'
+[10.762s] INFO:colcon.colcon_core.shell:Creating prefix chain script '/home/user/ros2_ws/src/advanced_perception/advanced_perception/install/setup.zsh'

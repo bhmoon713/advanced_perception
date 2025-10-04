@@ -1,0 +1,40 @@
+source ~/ros2_ws/install/setup.bash
+ros2 launch the_construct_office_gazebo starbots_ur3e.launch.xml
+
+# starting detection node
+cd ros2_ws/src/advanced_perception/advanced_perception/
+python3 topdown_circle_detection.py
+
+ros2 topic echo /circle_inference_result
+
+# starting detection node
+cd ros2_ws/src/advanced_perception/advanced_perception/
+python3 circle_detection.py
+
+#rviz setup
+rviz2 -d ~/ros2_ws/src/advanced_perception/rviz/basic.rviz
+ros2 topic echo /circle_detector/output
+
+to check location of cups
+ros2 topic echo /circle_inference_result
+
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r /cmd_vel:=/barista_1/cmd_vel
+
+
+rviz2 -d /absolute/path/to/xx.rviz
+
+83 pixel : large circle
+16~17 pixel : small circle
+
+1pixel = Diameter 
+
+need combinded message
+ID
+circle size
+x
+y
+
+<cylinder length="0.006" radius="0.170"/>
+
+Compare raw vs correction
+add grid line 

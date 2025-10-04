@@ -19,7 +19,7 @@ class YoloSegmentation(Node):
 
         self.subscription = self.create_subscription(
             Image,
-            '/deepmind_robot1/deepmind_robot1_camera/image_raw',
+            '/wrist_rgbd_depth_sensor/image_raw',
             self.camera_callback,
             10)
 
