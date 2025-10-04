@@ -46,12 +46,13 @@ class CircleDetectorBEV(Node):
         self.sub_info = self.create_subscription(CameraInfo,
                                                  self.get_parameter('camera_info_topic').value,
                                                  self.on_info, 10)
-        self.pub_bev   = self.create_publisher(Image, '/tilt_corrected_output', 1)
-        self.pub_annot = self.create_publisher(Image, '/circle_detector/output', 1)
-        self.pub_inf   = self.create_publisher(InferenceResult, '/circle_inference_result', 10)
-        self.pub_center= self.create_publisher(PointStamped, '/circle_center', 10)
-        self.pub_count = self.create_publisher(Int32, '/circle_count', 10)
-        self.pub_radii = self.create_publisher(Float32MultiArray, '/circle_radii_px', 10)
+        self.pub_bev     = self.create_publisher(Image, '/tilt_corrected_output', 1)
+        self.pub_annot   = self.create_publisher(Image, '/circle_detector/output', 1)
+        self.pub_inf     = self.create_publisher(InferenceResult, '/circle_inference_result', 10)
+        self.pub_center  = self.create_publisher(PointStamped, '/circle_center', 10)
+        self.pub_count   = self.create_publisher(Int32, '/circle_count', 10)
+        self.pub_radii   = self.create_publisher(Float32MultiArray, '/circle_radii_px', 10)
+        self.pub_cropped = self.create_publisher(Image, '/circle_detector/output_cropped', 1)
 
         # ---- Physical setup ----
         self.declare_parameter('tilt_axis', 'pitch')
@@ -65,16 +66,16 @@ class CircleDetectorBEV(Node):
         self.declare_parameter('max_out_width',  0)
         self.declare_parameter('max_out_height', 0)
 
-        # ---- Shared Hough parameters ----
+        # ---- Hough params ----
         self.declare_parameter('dp', 1.2)
         self.declare_parameter('minDist', 40.0)
         self.declare_parameter('param1', 100.0)
         self.declare_parameter('param2', 30.0)
 
-        # ---- Only allow these radii ----
-        self.declare_parameter('allowed_radii', [17, 18])
+        # ---- Allowed small radii ----
+        self.declare_parameter('allowed_radii', [17, 18])  # 19 ignored silently
 
-        # ---- Axis/Origin overlay ----
+        # ---- Axis overlays (kept for annotated image) ----
         self.declare_parameter('draw_axes', True)
         self.declare_parameter('axes_mode', 'meters')
         self.declare_parameter('axis_x_m', 0.0)
@@ -85,6 +86,9 @@ class CircleDetectorBEV(Node):
         self.declare_parameter('axis_color_b', 255)
         self.declare_parameter('axis_color_g', 255)
         self.declare_parameter('axis_color_r', 255)
+
+        # ---- Crop params ----
+        self.CROP_SIZE = (200, 200)  # (w, h)
 
         self.K = None
         self.D = None
@@ -117,7 +121,7 @@ class CircleDetectorBEV(Node):
         newK = self.K.copy()
         und = cv2.undistort(img, self.K, self.D, None, newK)
 
-        # ---- Homography (unchanged) ----
+        # ---- Homography ----
         height_m = float(self.get_parameter('height_m').value)
         tilt_deg = float(self.get_parameter('tilt_deg').value)
         yaw_deg  = float(self.get_parameter('yaw_deg').value)
@@ -171,16 +175,21 @@ class CircleDetectorBEV(Node):
         A = np.array([[ ppm,   0.0, -ppm * xmin],
                       [ 0.0, -ppm,  ppm *  ymax],
                       [ 0.0,  0.0,  1.0      ]], dtype=float)
-        M = A @ H_img2plane
+        M = A @ H_img2plane  # image -> BEV
 
         bev = cv2.warpPerspective(und, M, (out_w, out_h),
                                   flags=cv2.INTER_LINEAR,
                                   borderMode=cv2.BORDER_CONSTANT,
                                   borderValue=(0, 0, 0))
 
+        # Publish clean BEV
         bev_msg = self.bridge.cv2_to_imgmsg(bev, encoding='bgr8')
         bev_msg.header = msg.header
         self.pub_bev.publish(bev_msg)
+
+        # Keep copies for different uses
+        bev_clean   = bev.copy()  # used for CROPS (no overlays)
+        annotated   = bev.copy()  # we draw on this for /circle_detector/output
 
         # ---- Circle detection ----
         gray = cv2.cvtColor(bev, cv2.COLOR_BGR2GRAY)
@@ -190,29 +199,30 @@ class CircleDetectorBEV(Node):
         minDist   = float(self.get_parameter('minDist').value)
         param1    = float(self.get_parameter('param1').value)
         param2    = float(self.get_parameter('param2').value)
+        H_img, W_img = bev.shape[:2]
 
-        allowed_radii = set(int(x) for x in self.get_parameter('allowed_radii').value)
-
-        circles = cv2.HoughCircles(
+        # ================== SMALL circles (17/18; 19 ignored) ==================
+        allowed_small = set(int(x) for x in self.get_parameter('allowed_radii').value)
+        circles_small = cv2.HoughCircles(
             gray, cv2.HOUGH_GRADIENT,
             dp=dp, minDist=minDist, param1=param1, param2=param2,
             minRadius=15, maxRadius=22
         )
 
-        annotated = bev.copy()
+        detections_small = []
         radii_all = []
-        detections = []
 
-        H, W = bev.shape[:2]
-
-        def publish_detection(x, y, r_int):
+        def publish_small(x, y, r_int):
             radii_all.append(float(r_int))
+            left   = max(0, int(x - r_int))
+            top    = max(0, int(y - r_int))
+            right  = min(W_img - 1, int(x + r_int))
+            bottom = min(H_img - 1, int(y + r_int))
 
             inf = InferenceResult()
             inf.class_name = f"circle_r{r_int}"
-            inf.left, inf.top = max(0, int(x - r_int)), max(0, int(y - r_int))
-            inf.right, inf.bottom = min(W-1, int(x + r_int)), min(H-1, int(y + r_int))
-            inf.box_width, inf.box_height = inf.right - inf.left, inf.bottom - inf.top
+            inf.left, inf.top, inf.right, inf.bottom = left, top, right, bottom
+            inf.box_width, inf.box_height = right - left, bottom - top
             inf.x, inf.y = float(x), float(y)
             self.pub_inf.publish(inf)
 
@@ -221,34 +231,129 @@ class CircleDetectorBEV(Node):
             pt.point.x, pt.point.y, pt.point.z = float(x), float(y), 0.0
             self.pub_center.publish(pt)
 
-        if circles is not None:
-            c = np.uint16(np.around(circles[0]))
-            for (x, y, r) in c:
+        if circles_small is not None:
+            c_small = np.uint16(np.around(circles_small[0]))
+            for (x, y, r) in c_small:
                 r_int = int(r)
                 if r_int == 19:
                     continue
-                if r_int not in allowed_radii:
+                if r_int not in allowed_small:
                     continue
 
+                # draw on annotated (green)
                 cv2.circle(annotated, (x, y), r_int, (0, 255, 0), 2)
                 cv2.circle(annotated, (x, y), 2, (0, 255, 0), 3)
                 cv2.putText(annotated, f"r={r_int}", (x+6, y-6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
 
-                publish_detection(x, y, r_int)
-                detections.append((int(x), int(y), r_int))
+                publish_small(x, y, r_int)
+                detections_small.append((int(x), int(y), r_int))
 
-        # Log each circle + summary
-        for i, (x, y, r_int) in enumerate(detections, start=1):
+        # per-circle + summary logs (small)
+        for i, (x, y, r_int) in enumerate(detections_small, start=1):
             self.get_logger().info(f"[CIRCLE {i}] r={r_int}px at (x={x}, y={y})")
+        det_str = ", ".join([f"(x={x},y={y},r={r})" for (x,y,r) in detections_small]) or "none"
+        self.get_logger().info(f"[CIRCLES] count={len(detections_small)}; {det_str}")
 
-        det_str = ", ".join([f"(x={x},y={y},r={r})" for (x,y,r) in detections]) or "none"
-        self.get_logger().info(f"[CIRCLES] count={len(detections)}; {det_str}")
+        # ================== LARGE circles (88/89) → crops from CLEAN ==================
+        circles_large = cv2.HoughCircles(
+            gray, cv2.HOUGH_GRADIENT,
+            dp=dp, minDist=minDist, param1=param1, param2=param2,
+            minRadius=85, maxRadius=92
+        )
 
-        # Publish outputs
-        self.pub_count.publish(Int32(data=len(detections)))
-        self.pub_radii.publish(Float32MultiArray(data=radii_all))
+        def centered_crop_with_padding(src, cx, cy, box_w, box_h):
+            """Return a box_w×box_h crop centered at (cx,cy). Pads with black if needed."""
+            half_w, half_h = box_w // 2, box_h // 2
+            x0, y0 = int(cx) - half_w, int(cy) - half_h
+            x1, y1 = x0 + box_w, y0 + box_h
+            Hs, Ws = src.shape[:2]
+            x0c, y0c = max(0, x0), max(0, y0)
+            x1c, y1c = min(Ws, x1), min(Hs, y1)
+            canvas = np.zeros((box_h, box_w, 3), dtype=src.dtype)
+            if x0c < x1c and y0c < y1c:
+                crop = src[y0c:y1c, x0c:x1c]
+                dst_x, dst_y = x0c - x0, y0c - y0
+                canvas[dst_y:dst_y+crop.shape[0], dst_x:dst_x+crop.shape[1]] = crop
+            return canvas
+
+        crops = []
+        if circles_large is not None:
+            c_large = np.uint16(np.around(circles_large[0]))
+            for (x, y, r) in c_large:
+                r_int = int(r)
+                if r_int not in (88, 89):
+                    continue
+
+                # draw on annotated (red)
+                cv2.circle(annotated, (x, y), r_int, (0, 0, 255), 2)
+                cv2.circle(annotated, (x, y), 2, (0, 0, 255), 3)
+                cv2.putText(annotated, f"R={r_int}", (x+6, y-6),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1, cv2.LINE_AA)
+
+                # crop from CLEAN (no text/overlays)
+                crops.append(centered_crop_with_padding(
+                    bev_clean, x, y, self.CROP_SIZE[0], self.CROP_SIZE[1]
+                ))
+
+        # Build horizontal strip for /output_cropped (NO annotations on crops)
+        if len(crops) == 0:
+            cropped_out = np.zeros((self.CROP_SIZE[1], self.CROP_SIZE[0], 3), dtype=np.uint8)
+        else:
+            gap = 5
+            total_w = len(crops) * self.CROP_SIZE[0] + (len(crops)-1) * gap
+            total_h = self.CROP_SIZE[1]
+            cropped_out = np.zeros((total_h, total_w, 3), dtype=np.uint8)
+            x_off = 0
+            for crop in crops:
+                cropped_out[0:self.CROP_SIZE[1], x_off:x_off+self.CROP_SIZE[0]] = crop
+                x_off += self.CROP_SIZE[0] + gap
+
+        # ---------- AXIS / ORIGIN OVERLAY (only on annotated) ----------
+        if bool(self.get_parameter('draw_axes').value):
+            axes_mode = str(self.get_parameter('axes_mode').value).lower()
+            thickness = int(self.get_parameter('axis_thickness').value)
+            color = (
+                int(self.get_parameter('axis_color_b').value),
+                int(self.get_parameter('axis_color_g').value),
+                int(self.get_parameter('axis_color_r').value),
+            )
+
+            def plane_to_bev_px(X, Y):
+                u = ppm * (X - xmin)
+                v = ppm * (ymax - Y)
+                return int(round(u)), int(round(v))
+
+            if axes_mode == 'meters':
+                X_m = float(self.get_parameter('axis_x_m').value)
+                Y_m = float(self.get_parameter('axis_y_m').value)
+                x_px, y_px = plane_to_bev_px(X_m, Y_m)
+            else:
+                x_px = int(self.get_parameter('axis_x_px').value)
+                y_px = int(self.get_parameter('axis_y_px').value)
+
+            if 0 <= x_px < W_img:
+                cv2.line(annotated, (x_px, 0), (x_px, H_img-1), color, thickness, lineType=cv2.LINE_AA)
+            if 0 <= y_px < H_img:
+                cv2.line(annotated, (0, y_px), (W_img-1, y_px), color, thickness, lineType=cv2.LINE_AA)
+            if 0 <= y_px < H_img:
+                cv2.line(annotated, (0, y_px-100), (W_img-1, y_px-100), color, thickness, lineType=cv2.LINE_AA)
+
+            if 0 <= x_px < W_img and 0 <= y_px < H_img:
+                cv2.putText(annotated, f"axes@({x_px},{y_px}) [{axes_mode}]",
+                            (min(x_px+6, W_img-120), max(y_px-6, 12)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
+
+        # ---------- Publish ----------
+        # clean BEV already published to /tilt_corrected_output
         self.pub_annot.publish(self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8'))
+
+        crop_msg = self.bridge.cv2_to_imgmsg(cropped_out, encoding='bgr8')
+        crop_msg.header = msg.header
+        self.pub_cropped.publish(crop_msg)
+
+        self.pub_count.publish(Int32(data=len(detections_small)))
+        self.pub_radii.publish(Float32MultiArray(data=radii_all))
 
 def main(args=None):
     rclpy.init(args=args)
