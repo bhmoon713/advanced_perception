@@ -220,7 +220,8 @@ class CircleDetectorBEV(Node):
             bottom = min(H_img - 1, int(y + r_int))
 
             inf = InferenceResult()
-            inf.class_name = f"circle_r{r_int}"
+            # inf.class_name = f"circle_r{r_int}"
+            inf.class_name = f"circle_small"
             inf.left, inf.top, inf.right, inf.bottom = left, top, right, bottom
             inf.box_width, inf.box_height = right - left, bottom - top
             inf.x, inf.y = float(x), float(y)

@@ -28,6 +28,7 @@ setup(
         'transform_test = advanced_perception.transform_test:main',
         'tilt_corrected_circle_detector = advanced_perception.tilt_corrected_circle_detector:main',
         'topdown_circle_detection = advanced_perception.topdown_circle_detection:main',
+        'cup_hole_inspector = advanced_perception.cup_hole_inspector:main',
         ],
     },
 )
