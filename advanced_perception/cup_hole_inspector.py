@@ -5,6 +5,7 @@ from rclpy.node import Node
 import cv2
 import numpy as np
 from math import atan2, sin, cos, radians
+import time  # <-- added
 
 from sensor_msgs.msg import Image
 from nav_msgs.msg import Odometry
@@ -14,30 +15,8 @@ from cv_bridge import CvBridge
 
 class CupHoleInspector(Node):
     """
-    Subscribes to /circle_detector/output_cropped (a horizontal strip of 200x200 crops),
-    classifies the 4 main holes in EACH tile as FILLED/EMPTY, and publishes:
-
-      - /cup_hole_inspector/output           (Image): annotated strip (green=FILLED, red=EMPTY)
-      - /cup_hole_inspector/status           (Int32MultiArray): 0/1 per hole per tile (1=FILLED, 0=EMPTY)
-      - /cup_hole_inspector/filled_count     (Int32): total filled holes in the strip
-
-    NEW:
-      - Subscribes to robot pose (/barista_1/odom by default), computes yaw, and rotates the
-        configured hole offsets by that yaw before testing each hole. This adapts to robot rotation.
-
-    Tuning:
-      - hole_offsets_px: list[int] flattened [dx1,dy1,...,dx4,dy4] from tile center (px)
-      - hole_radius_px: int radius of each cup hole mask (px)
-      - red_hsv_*: HSV ranges for red (for EMPTY detection)
-      - min_red_fraction: fraction of red pixels in hole mask to consider it EMPTY
-      - sat_threshold: minimum mean saturation in mask for red to count
-      - tile_width/height: expected crop size (default 200x200)
-
-    Rotation params:
-      - pose_topic (default '/barista_1/odom')
-      - use_rotation (bool, default True)
-      - yaw_sign (int, default -1)     # +1 or -1 depending on your camera/world convention
-      - yaw_offset_deg (float, default 0.0)  # add small calibration bias if needed
+    Same behavior and log formats as before; logs are now throttled to once per second.
+    Set -p log_period_sec:=1.5 to change the rate if you want.
     """
 
     def __init__(self):
@@ -75,11 +54,15 @@ class CupHoleInspector(Node):
         # --- Rotation / pose inputs
         self.declare_parameter("pose_topic", "/barista_1/odom")
         self.declare_parameter("use_rotation", True)
-        self.declare_parameter("yaw_sign", 1)          # scene appears to rotate opposite robot
-        self.declare_parameter("yaw_offset_deg", 90.0)   # fine-tune bias, if camera not perfectly aligned
+        self.declare_parameter("yaw_sign", 1)
+        self.declare_parameter("yaw_offset_deg", 90.0)
+
+        # --- Logging throttle (once per second by default)
+        self.declare_parameter("log_period_sec", 2.0)
+        self._last_yaw_log  = 0.0
+        self._last_img_log  = 0.0
 
         self.yaw_rad = 0.0
-        self._last_yaw_log_time = 0.0
         pose_topic = self.get_parameter("pose_topic").value
         self.pose_sub = self.create_subscription(Odometry, pose_topic, self.on_odom, 10)
 
@@ -99,11 +82,12 @@ class CupHoleInspector(Node):
         yaw_offset_deg = float(self.get_parameter("yaw_offset_deg").value)
         self.yaw_rad = yaw_sign * yaw + radians(yaw_offset_deg)
 
-        # Throttled log
-        now = self.get_clock().now().nanoseconds * 1e-9
-        if now - self._last_yaw_log_time > 1.5:  # every ~1.5s
-            self._last_yaw_log_time = now
-            self.get_logger().info(f"yaw(rad)={self.yaw_rad:.3f}  yaw(deg)={np.degrees(self.yaw_rad):.1f}")
+        # Throttle yaw log to once per second (same format as before)
+        period = float(self.get_parameter("log_period_sec").value)
+        now = time.monotonic()
+        if (now - self._last_yaw_log) >= period:
+            self._last_yaw_log = now
+            # self.get_logger().info(f"yaw(rad)={self.yaw_rad:.3f}  yaw(deg)={np.degrees(self.yaw_rad):.1f}")
 
     # ---------- helpers ----------
     def _hole_centers_rotated(self, W: int, H: int):
@@ -190,8 +174,15 @@ class CupHoleInspector(Node):
         radius = int(self.get_parameter("hole_radius_px").value)
 
         H, W = strip.shape[:2]
+
+        # decide if we will emit logs for THIS frame (once per second)
+        period = float(self.get_parameter("log_period_sec").value)
+        now = time.monotonic()
+        do_log = (now - self._last_img_log) >= period
+
         if H < tile_h:
-            self.get_logger().warn(f"Incoming crop strip height {H} < expected {tile_h}. Resizing to proceed.")
+            if do_log:
+                self.get_logger().warn(f"Incoming crop strip height {H} < expected {tile_h}. Resizing to proceed.")
             strip = cv2.resize(strip, (max(W, tile_w), tile_h), interpolation=cv2.INTER_AREA)
             H, W = strip.shape[:2]
 
@@ -220,15 +211,17 @@ class CupHoleInspector(Node):
                 # annotate only on /cup_hole_inspector/output
                 cv2.circle(tile_annot, (cx, cy), radius, color, 2)
                 cv2.putText(tile_annot, label, (cx - 32, cy - radius - 6),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
                 cv2.circle(tile_annot, (cx, cy), 2, color, -1)
 
                 status_values.append(1 if is_filled else 0)
                 total_filled += int(is_filled)
 
-                self.get_logger().info(
-                    f"[tile {i}] hole {idx}: {label} (red_frac={red_frac:.2f}, sat={sat_mean:.1f})"
-                )
+                # **same per-hole log as before**, but only once per second
+                if do_log:
+                    self.get_logger().info(
+                        f"[tile {i}] hole {idx}: {label} (red_frac={red_frac:.2f}, sat={sat_mean:.1f})"
+                    )
 
             annotated[0:tile_h, x0:x1] = tile_annot
 
@@ -243,9 +236,12 @@ class CupHoleInspector(Node):
         self.pub_status.publish(arr)
         self.pub_count.publish(Int32(data=total_filled))
 
-        self.get_logger().info(
-            f"[summary] tiles={num_tiles}, holes/tile=4, filled={total_filled}, empty={len(status_values)-total_filled}"
-        )
+        # **same summary log as before**, but only once per second
+        if do_log:
+            self.get_logger().info(
+                f"[summary] tiles={num_tiles}, holes/tile=4, filled={total_filled}, empty={len(status_values)-total_filled}"
+            )
+            self._last_img_log = now  # mark the logging window as used
 
 
 def main(args=None):

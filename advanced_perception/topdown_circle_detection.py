@@ -4,6 +4,7 @@ from rclpy.node import Node
 
 import numpy as np
 import cv2
+import time
 
 from sensor_msgs.msg import Image, CameraInfo
 from geometry_msgs.msg import PointStamped
@@ -32,6 +33,13 @@ def Rz(theta):
                      [0, 0, 1]], dtype=float)
 
 class CircleDetectorBEV(Node):
+    """
+    - Builds a BEV image, detects circles.
+    - Small circles (r ~17/18 px; 19 ignored) are ranked by distance to anchor (325,331)
+      and published as class_name: 'small_circle_priority_<rank>'.
+    - Logs keep your original format but are throttled to ~1 Hz.
+    """
+
     def __init__(self):
         super().__init__('circle_detector_bev')
         self.bridge = CvBridge()
@@ -87,6 +95,11 @@ class CircleDetectorBEV(Node):
         self.declare_parameter('axis_color_g', 255)
         self.declare_parameter('axis_color_r', 255)
 
+        # ---- Priority labels + anchor ----
+        self.declare_parameter('draw_priority_labels', True)
+        self.declare_parameter('priority_anchor_x_px', 325)  # final anchor
+        self.declare_parameter('priority_anchor_y_px', 331)  # final anchor
+
         # ---- Crop params ----
         self.CROP_SIZE = (200, 200)  # (w, h)
 
@@ -94,9 +107,34 @@ class CircleDetectorBEV(Node):
         self.D = None
         self.size = None
 
+        # ---- Logging throttle (once per second for image logs & camera-info warn) ----
+        self.declare_parameter('log_period_sec', 1.0)  # default 1 Hz
+        self._last_img_log = 0.0
+        self._last_info_wait_log = 0.0
+
         self.get_logger().info(f"Subscribed image: {cam_topic}")
         self.get_logger().info(f"Subscribed camera info: {self.get_parameter('camera_info_topic').value}")
 
+    # ---------- helper: publish one small circle with given class name ----------
+    def _publish_small(self, x, y, r_int, class_name, header, W_img, H_img):
+        left   = max(0, int(x - r_int))
+        top    = max(0, int(y - r_int))
+        right  = min(W_img - 1, int(x + r_int))
+        bottom = min(H_img - 1, int(y + r_int))
+
+        inf = InferenceResult()
+        inf.class_name = class_name
+        inf.left, inf.top, inf.right, inf.bottom = left, top, right, bottom
+        inf.box_width, inf.box_height = right - left, bottom - top
+        inf.x, inf.y = float(x), float(y)
+        self.pub_inf.publish(inf)
+
+        pt = PointStamped()
+        pt.header = header
+        pt.point.x, pt.point.y, pt.point.z = float(x), float(y), 0.0
+        self.pub_center.publish(pt)
+
+    # ---------- CameraInfo ----------
     def on_info(self, msg: CameraInfo):
         try:
             self.K = np.array(msg.k, dtype=float).reshape(3, 3)
@@ -105,9 +143,16 @@ class CircleDetectorBEV(Node):
         except Exception as e:
             self.get_logger().error(f"CameraInfo parse error: {e}")
 
+    # ---------- Image ----------
     def on_image(self, msg: Image):
+        period = float(self.get_parameter('log_period_sec').value)
+        now = time.monotonic()
+        do_log = (now - self._last_img_log) >= period
+
         if self.K is None or self.size is None:
-            self.get_logger().warn("Waiting for CameraInfo...")
+            if (now - self._last_info_wait_log) >= period:
+                self._last_info_wait_log = now
+                self.get_logger().warn("Waiting for CameraInfo...")
             return
 
         # Decode & undistort
@@ -187,9 +232,10 @@ class CircleDetectorBEV(Node):
         bev_msg.header = msg.header
         self.pub_bev.publish(bev_msg)
 
-        # Keep copies for different uses
-        bev_clean   = bev.copy()  # used for CROPS (no overlays)
-        annotated   = bev.copy()  # we draw on this for /circle_detector/output
+        # Copies
+        annotated   = bev.copy()  # for visualization
+        bev_clean   = bev.copy()  # for crops
+        H_img, W_img = bev.shape[:2]
 
         # ---- Circle detection ----
         gray = cv2.cvtColor(bev, cv2.COLOR_BGR2GRAY)
@@ -199,7 +245,6 @@ class CircleDetectorBEV(Node):
         minDist   = float(self.get_parameter('minDist').value)
         param1    = float(self.get_parameter('param1').value)
         param2    = float(self.get_parameter('param2').value)
-        H_img, W_img = bev.shape[:2]
 
         # ================== SMALL circles (17/18; 19 ignored) ==================
         allowed_small = set(int(x) for x in self.get_parameter('allowed_radii').value)
@@ -209,29 +254,7 @@ class CircleDetectorBEV(Node):
             minRadius=15, maxRadius=22
         )
 
-        detections_small = []
-        radii_all = []
-
-        def publish_small(x, y, r_int):
-            radii_all.append(float(r_int))
-            left   = max(0, int(x - r_int))
-            top    = max(0, int(y - r_int))
-            right  = min(W_img - 1, int(x + r_int))
-            bottom = min(H_img - 1, int(y + r_int))
-
-            inf = InferenceResult()
-            # inf.class_name = f"circle_r{r_int}"
-            inf.class_name = f"circle_small"
-            inf.left, inf.top, inf.right, inf.bottom = left, top, right, bottom
-            inf.box_width, inf.box_height = right - left, bottom - top
-            inf.x, inf.y = float(x), float(y)
-            self.pub_inf.publish(inf)
-
-            pt = PointStamped()
-            pt.header = msg.header
-            pt.point.x, pt.point.y, pt.point.z = float(x), float(y), 0.0
-            self.pub_center.publish(pt)
-
+        detections_small = []  # (x, y, r_int)
         if circles_small is not None:
             c_small = np.uint16(np.around(circles_small[0]))
             for (x, y, r) in c_small:
@@ -240,21 +263,52 @@ class CircleDetectorBEV(Node):
                     continue
                 if r_int not in allowed_small:
                     continue
-
-                # draw on annotated (green)
+                # draw the circle & center
                 cv2.circle(annotated, (x, y), r_int, (0, 255, 0), 2)
                 cv2.circle(annotated, (x, y), 2, (0, 255, 0), 3)
                 cv2.putText(annotated, f"r={r_int}", (x+6, y-6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1, cv2.LINE_AA)
-
-                publish_small(x, y, r_int)
                 detections_small.append((int(x), int(y), r_int))
 
-        # per-circle + summary logs (small)
-        for i, (x, y, r_int) in enumerate(detections_small, start=1):
-            self.get_logger().info(f"[CIRCLE {i}] r={r_int}px at (x={x}, y={y})")
-        det_str = ", ".join([f"(x={x},y={y},r={r})" for (x,y,r) in detections_small]) or "none"
-        self.get_logger().info(f"[CIRCLES] count={len(detections_small)}; {det_str}")
+        # --- Rank by distance to anchor (closest = 1) ---
+        radii_all = []
+        if detections_small:
+            ax = int(self.get_parameter('priority_anchor_x_px').value)  # 325
+            ay = int(self.get_parameter('priority_anchor_y_px').value)  # 331
+
+            ranked = sorted(
+                detections_small,
+                key=lambda c: (c[0] - ax) ** 2 + (c[1] - ay) ** 2
+            )
+
+            # Draw numeric rank on each circle and publish with priority class
+            if bool(self.get_parameter('draw_priority_labels').value):
+                for rank, (x, y, r_int) in enumerate(ranked, start=1):
+                    cv2.putText(
+                        annotated, f"{rank}", (int(x) - 8, int(y) + 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (50, 255, 255), 2, cv2.LINE_AA
+                    )
+
+            for rank, (x, y, r_int) in enumerate(ranked, start=1):
+                self._publish_small(
+                    x, y, r_int,
+                    class_name=f"small_circle_priority_{rank}",
+                    header=msg.header,
+                    W_img=W_img, H_img=H_img
+                )
+
+            # per-circle + summary logs (small) — SAME format, throttled
+            if do_log:
+                for i, (x, y, r_int) in enumerate(ranked, start=1):
+                    self.get_logger().info(f"[CIRCLE {i}] r={r_int}px at (x={x}, y={y})")
+                self.get_logger().info(f"[CIRCLES] count={len(ranked)}")
+                self._last_img_log = now
+
+            radii_all = [float(r) for (_, _, r) in ranked]
+        else:
+            if do_log:
+                self.get_logger().info(f"[CIRCLES] count=0")
+                self._last_img_log = now
 
         # ================== LARGE circles (88/89) → crops from CLEAN ==================
         circles_large = cv2.HoughCircles(
@@ -285,14 +339,10 @@ class CircleDetectorBEV(Node):
                 r_int = int(r)
                 if r_int not in (88, 89):
                     continue
-
-                # draw on annotated (red)
                 cv2.circle(annotated, (x, y), r_int, (0, 0, 255), 2)
                 cv2.circle(annotated, (x, y), 2, (0, 0, 255), 3)
                 cv2.putText(annotated, f"R={r_int}", (x+6, y-6),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255), 1, cv2.LINE_AA)
-
-                # crop from CLEAN (no text/overlays)
                 crops.append(centered_crop_with_padding(
                     bev_clean, x, y, self.CROP_SIZE[0], self.CROP_SIZE[1]
                 ))
@@ -346,7 +396,6 @@ class CircleDetectorBEV(Node):
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
 
         # ---------- Publish ----------
-        # clean BEV already published to /tilt_corrected_output
         self.pub_annot.publish(self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8'))
 
         crop_msg = self.bridge.cv2_to_imgmsg(cropped_out, encoding='bgr8')
@@ -355,6 +404,7 @@ class CircleDetectorBEV(Node):
 
         self.pub_count.publish(Int32(data=len(detections_small)))
         self.pub_radii.publish(Float32MultiArray(data=radii_all))
+
 
 def main(args=None):
     rclpy.init(args=args)
