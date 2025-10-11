@@ -98,7 +98,7 @@ class CircleDetectorBEV(Node):
         # ---- Priority labels + anchor ----
         self.declare_parameter('draw_priority_labels', True)
         self.declare_parameter('priority_anchor_x_px', 325)  # final anchor
-        self.declare_parameter('priority_anchor_y_px', 331)  # final anchor
+        self.declare_parameter('priority_anchor_y_px', 360)  # final anchor
 
         # ---- Crop params ----
         self.CROP_SIZE = (200, 200)  # (w, h)
